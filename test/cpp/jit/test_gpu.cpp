@@ -6719,7 +6719,7 @@ TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   testValidate(
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
@@ -6808,7 +6808,7 @@ TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   testValidate(
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
@@ -11482,72 +11482,72 @@ TEST(NVFuserTest, FusionOmitPredicate_CUDA) {
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 2> T1, Tensor<float, 1> T6, Tensor<float, 2> T8, Tensor<float, 2> T9) {
   float T2[128];
-  float T3[((ceilDiv(128, 32)) * 32)];
-  float T4[((ceilDiv(128, 31)) * 31)];
-  float T5[((((ceilDiv((ceilDiv(128, 32)), 2)) * 2) * (ceilDiv(32, 16))) * 16)];
-  float T7[(((ceilDiv((ceilDiv(128, 32)), 8)) * 8) * 32)];
   for(size_t ki40 = 0; ki40 < 128; ++ki40) {
     T2[ki40]
       = T0[(ki40 * T0.stride[0])]
       + 1;
   }
-  for(size_t ki49 = 0; ki49 < (ceilDiv(128, 32)); ++ki49) {
-    for(size_t ki52 = 0; ki52 < 32; ++ki52) {
-      T3[((ki49 * 32) + ki52)]
-        = T2[((ki49 * 32) + ki52)]
+  float T3[((ceilDiv(128, 32)) * 32)];
+  for(size_t ki48 = 0; ki48 < (ceilDiv(128, 32)); ++ki48) {
+    for(size_t ki51 = 0; ki51 < 32; ++ki51) {
+      T3[((ki48 * 32) + ki51)]
+        = T2[((ki48 * 32) + ki51)]
         + 1;
     }
   }
-  for(size_t ki63 = 0; ki63 < (ceilDiv(128, 31)); ++ki63) {
-    for(size_t ki66 = 0; ki66 < 31; ++ki66) {
-      if ((((ki63 * 31) + ki66) < 128)) {
-        T4[((ki63 * 31) + ki66)]
-          = T3[((ki63 * 31) + ki66)]
+  float T4[((ceilDiv(128, 31)) * 31)];
+  for(size_t ki60 = 0; ki60 < (ceilDiv(128, 31)); ++ki60) {
+    for(size_t ki63 = 0; ki63 < 31; ++ki63) {
+      if ((((ki60 * 31) + ki63) < 128)) {
+        T4[((ki60 * 31) + ki63)]
+          = T3[((ki60 * 31) + ki63)]
           + 1;
       }
     }
   }
-  for(size_t ki79 = 0; ki79 < (ceilDiv((ceilDiv(128, 32)), 2)); ++ki79) {
-    for(size_t ki82 = 0; ki82 < 2; ++ki82) {
-      for(size_t ki87 = 0; ki87 < (ceilDiv(32, 16)); ++ki87) {
-        for(size_t ki90 = 0; ki90 < 16; ++ki90) {
-          T5[((((ki79 * 2) + ki82) * 32) + ((ki87 * 16) + ki90))]
-            = T4[((((ki79 * 2) + ki82) * 32) + ((ki87 * 16) + ki90))]
+  float T5[((((ceilDiv((ceilDiv(128, 32)), 2)) * 2) * (ceilDiv(32, 16))) * 16)];
+  for(size_t ki74 = 0; ki74 < (ceilDiv((ceilDiv(128, 32)), 2)); ++ki74) {
+    for(size_t ki77 = 0; ki77 < 2; ++ki77) {
+      for(size_t ki82 = 0; ki82 < (ceilDiv(32, 16)); ++ki82) {
+        for(size_t ki85 = 0; ki85 < 16; ++ki85) {
+          T5[((((ki74 * 2) + ki77) * 32) + ((ki82 * 16) + ki85))]
+            = T4[((((ki74 * 2) + ki77) * 32) + ((ki82 * 16) + ki85))]
             + 1;
         }
       }
     }
   }
-  for(size_t ki99 = 0; ki99 < ((ceilDiv(128, 32)) * 32); ++ki99) {
-    T6[(((ki99 / 32) * 32) + (ki99 % 32))]
-      = T5[(((ki99 / 32) * 32) + (ki99 % 32))]
+  for(size_t ki90 = 0; ki90 < ((ceilDiv(128, 32)) * 32); ++ki90) {
+    T6[(((ki90 / 32) * 32) + (ki90 % 32))]
+      = T5[(((ki90 / 32) * 32) + (ki90 % 32))]
       + 1;
   }
-  for(size_t ki107 = 0; ki107 < (ceilDiv((ceilDiv(128, 32)), 8)); ++ki107) {
-    for(size_t ki110 = 0; ki110 < 8; ++ki110) {
-      for(size_t ki113 = 0; ki113 < 32; ++ki113) {
-        if ((((((ki107 * 8) + ki110) * 32) + ki113) < 128)) {
-          T7[((((ki107 * 8) + ki110) * 32) + ki113)]
-             = T6[((((ki107 * 8) + ki110) * 32) + ki113)];
+  float T7[(((ceilDiv((ceilDiv(128, 32)), 8)) * 8) * 32)];
+  for(size_t ki98 = 0; ki98 < (ceilDiv((ceilDiv(128, 32)), 8)); ++ki98) {
+    for(size_t ki101 = 0; ki101 < 8; ++ki101) {
+      for(size_t ki104 = 0; ki104 < 32; ++ki104) {
+        if ((((((ki98 * 8) + ki101) * 32) + ki104) < 128)) {
+          T7[((((ki98 * 8) + ki101) * 32) + ki104)]
+             = T6[((((ki98 * 8) + ki101) * 32) + ki104)];
         }
       }
     }
   }
-  for(size_t ki123 = 0; ki123 < (ceilDiv(T1.size[0], 32)); ++ki123) {
-    for(size_t ki124 = 0; ki124 < 32; ++ki124) {
-      for(size_t ki125 = 0; ki125 < T1.size[1]; ++ki125) {
-        if ((((ki123 * 32) + ki124) < T1.size[0])) {
-          T8[(((ki123 * 32) + ki124) * T8.stride[0]) + ki125]
-            = T1[(((ki123 * 32) + ki124) * T1.stride[0]) + (ki125 * T1.stride[1])]
-            + T7[((ki123 * 32) + ki124)];
+  for(size_t ki111 = 0; ki111 < (ceilDiv(T1.size[0], 32)); ++ki111) {
+    for(size_t ki112 = 0; ki112 < 32; ++ki112) {
+      for(size_t ki113 = 0; ki113 < T1.size[1]; ++ki113) {
+        if ((((ki111 * 32) + ki112) < T1.size[0])) {
+          T8[(((ki111 * 32) + ki112) * T8.stride[0]) + ki113]
+            = T1[(((ki111 * 32) + ki112) * T1.stride[0]) + (ki113 * T1.stride[1])]
+            + T7[((ki111 * 32) + ki112)];
         }
       }
     }
   }
-  for(size_t ki126 = 0; ki126 < (T1.size[0] * T1.size[1]); ++ki126) {
-    T9[ki126]
-      = T1[((ki126 / T1.size[1]) * T1.stride[0]) + ((ki126 % T1.size[1]) * T1.stride[1])]
-      + T8[ki126];
+  for(size_t ki114 = 0; ki114 < (T1.size[0] * T1.size[1]); ++ki114) {
+    T9[ki114]
+      = T1[((ki114 / T1.size[1]) * T1.stride[0]) + ((ki114 % T1.size[1]) * T1.stride[1])]
+      + T8[ki114];
   }
 }
 )";
@@ -11575,6 +11575,43 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 2> T1, Te
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, {t6, t8, t9}, __LINE__, __FILE__);
+}
+
+// Grid reduction can be executed only once in a kernel. Should result
+// in an error at the time of compilation.
+TEST(NVFuserTest, FusionGridReductionInLoop_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  fusion.addOutput(tv1);
+
+  tv1->axis(1)->parallelize(ParallelType::BIDx);
+
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+}
+
+// Grid reduction can be executed only once in a kernel. Should result
+// in an error at the time of compilation.
+TEST(NVFuserTest, FusionMultipleGridReductions_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+  auto tv2 = sum(tv0, {0});
+  fusion.addOutput(tv2);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+
+  FusionExecutor fe;
+  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
 } // namespace jit
