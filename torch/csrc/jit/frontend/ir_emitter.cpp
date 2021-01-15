@@ -428,10 +428,26 @@ struct Environment {
     throw ErrorReport(range) << "undefined value " << ident;
   }
 
+  // NOTE:
+  // - it doesn't affect Python calls to torch.jit.script(foo)
+  //   (since the name resolution is done on the Python side. This can either be
+  //    a pro or a con depending on how you look at it. Either way, if catchin
+  //    the Python case is deemed to be desirable it can be done)
+  // - the prefix resolution "switch" only works for top-level objects in this
+  //   simple prototype (can also be fixed if needed)
   SugaredValuePtr getSugaredVar(
       const std::string& ident,
       const SourceRange& range,
       bool required = true) {
+    const auto retval =
+        getSugaredVarHelper("_torch_jit_" + ident, range, false);
+    return retval ? retval : getSugaredVarHelper(ident, range, required);
+  }
+
+  SugaredValuePtr getSugaredVarHelper(
+      const std::string& ident,
+      const SourceRange& range,
+      bool required) {
     auto retval = findInAnyFrame(ident);
 
     if (!retval) {
