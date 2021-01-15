@@ -9,21 +9,6 @@ from torch._six import container_abcs, string_classes
 from typing import Any
 
 
-# JIT specific definition
-class _torch_jit_autocast(object):
-    def __init__(self, enabled:bool=True):
-        self._enabled = enabled
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type:Any, exc_val:Any, exc_tb:Any):
-        pass
-
-    def __call__(self, func):
-        return func
-
-
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
     def decorate_autocast(*args, **kwargs):
