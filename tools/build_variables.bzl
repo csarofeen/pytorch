@@ -160,6 +160,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
     "torch/csrc/jit/jit_log.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
+    "torch/csrc/jit/passes/automatic_mixed_precision.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",

@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/passes/automatic_mixed_precision.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -72,13 +73,18 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 
 void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   Inline(*graph);
+
   // Peephole Optimize cleans up many "is None" checks and creates constant prop
   // opportunities
   PeepholeOptimize(graph, true);
-  // // AliasDb construction can be slow, so run it just on immutable types
-  // // to clean up constant Ifs & other easy wins
+
+  // AliasDb construction can be slow, so run it just on immutable types
+  // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
   ConstantPooling(graph);
+
+  // Inject casts for automatic mixed precision
+  AutomaticMixedPrecision(graph);
 }
 
 } // namespace jit
