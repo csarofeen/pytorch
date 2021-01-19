@@ -84,6 +84,13 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   ConstantPooling(graph);
 
   // Inject casts for automatic mixed precision
+  //
+  // TODO: Ideally, this pass could run earlier, before inlining
+  //  or any other optimizations. That setup is preferable because:
+  //  1. The AMP pass would be self-contained and function independently 
+  //     of the any optimizations
+  //  2. AMP transformations would benefit from followup passes's cleanup
+  //
   AutomaticMixedPrecision(graph);
 }
 
