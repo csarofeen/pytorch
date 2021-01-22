@@ -2,38 +2,97 @@
 #include <torch/csrc/jit/passes/automatic_mixed_precision.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
+
+#include <stack>
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-void handleBlock(Block* block, bool initial_autocast_enabled) {
-  bool autocast_enabled = initial_autocast_enabled;
+struct AutocastScope {
+  Value* instance = nullptr;
+  bool enabled = false;
+};
+
+// If we have an autocast instance, return it
+//
+// This is the pattern we're looking for (this is done after
+//  autocast.__init__() has been inlined)
+//
+// %4 : bool = prim::Constant[value=1]()
+// %5 : __torch__.torch.cuda.amp.autocast_mode.autocast = prim::CreateObject()
+//  = prim::SetAttr[name="_enabled"](%5, %4)
+//
+// Notes:
+//  1. There's no guarantee that the autocast instance is in the same block
+//    as the prim::Enter() node
+//  2. `prim::SetAttr` must follow `prim::CreateObject()` in the same block,
+//    but there might be other nodes in between
+//
+c10::optional<AutocastScope> parseAutocast(Value* value) {
+  if (value->node()->kind() == prim::CreateObject) {
+    const auto class_name = getModuleName(value);
+    if (class_name &&
+        *class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast") {
+      // Search for `prim::SetAttr[name="_enabled"]`
+      for (Use use : value->uses()) {
+        if (use.user->kind() == prim::SetAttr &&
+            use.user->s(attr::name) == "_enabled") {
+          const auto def = use.user->input(1)->node();
+          if (def->kind() != prim::Constant) {
+            AT_ERROR("Autocast argument must be a constant");
+          }
+
+          // We have an autocast instance
+          AutocastScope scope;
+          scope.instance = value;
+          scope.enabled = def->i(attr::value) ? true : false;
+          std::cout << "\n*** " << scope.enabled << "\n"; // $$$
+          return scope;
+        }
+      }
+    }
+  }
+
+  // Not an autocast...
+  return c10::nullopt;
+}
+
+void handleBlock(Block* block, bool initial_state) {
+  std::stack<AutocastScope> autocast_stack;
+
+  // The current autocast enabled/disabled state
+  auto current_state = [&] {
+    return autocast_stack.empty() ? initial_state
+                                  : autocast_stack.top().enabled;
+  };
 
   for (Node* node : block->nodes()) {
     switch (node->kind()) {
       case prim::CallFunction:
       case prim::CallMethod:
-        TORCH_INTERNAL_ASSERT(false, "Calls are not supported with AMP & JIT");
-        break;
-
-      case prim::CreateObject:
-        // TODO
-        break;
-
-      case prim::SetAttr:
-        // TODO
+        TORCH_INTERNAL_ASSERT(false, "Calls are not expected with AMP & JIT");
         break;
 
       case prim::Enter:
-        // TODO
+        if (auto autocast_scope = parseAutocast(node->input())) {
+          autocast_stack.push(*autocast_scope);
+        }
         break;
 
       case prim::Exit:
-        // TODO
+        // TODO: technically we can avoid parseAutocast() here
+        if (auto autocast_scope = parseAutocast(node->input())) {
+          TORCH_INTERNAL_ASSERT(!autocast_stack.empty());
+          TORCH_INTERNAL_ASSERT(
+              autocast_stack.top().instance == autocast_scope->instance);
+          autocast_stack.pop();
+        }
         break;
 
       // CastPolicy::fp16 (cast all inputs to float16)
@@ -136,12 +195,12 @@ void handleBlock(Block* block, bool initial_autocast_enabled) {
 
     // process sub-blocks, if any
     for (Block* sub_block : node->blocks()) {
-      handleBlock(sub_block, autocast_enabled);
+      handleBlock(sub_block, current_state());
     }
   }
 
   // Sanity check: make sure there's no unbalanced transition
-  TORCH_INTERNAL_ASSERT(autocast_enabled == initial_autocast_enabled);
+  TORCH_INTERNAL_ASSERT(autocast_stack.empty());
 }
 
 } // namespace
