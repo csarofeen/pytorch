@@ -81,7 +81,6 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   // AliasDb construction can be slow, so run it just on immutable types
   // to clean up constant Ifs & other easy wins
   ConstantPropagationImmutableTypes(graph);
-  ConstantPooling(graph);
 
   // Inject casts for automatic mixed precision
   //
@@ -92,6 +91,8 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   //  2. AMP transformations would benefit from followup passes's cleanup
   //
   AutomaticMixedPrecision(graph);
+
+  ConstantPooling(graph);
 }
 
 } // namespace jit

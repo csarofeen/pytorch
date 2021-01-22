@@ -1,6 +1,7 @@
 
 #include <torch/csrc/jit/passes/automatic_mixed_precision.h>
 
+#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -8,6 +9,7 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
 #include <stack>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -61,6 +63,34 @@ c10::optional<AutocastScope> parseAutocast(Value* value) {
 
   // Not an autocast...
   return c10::nullopt;
+}
+
+void castTensorInputs(Node* node, at::ScalarType dtype) {
+  const auto graph = node->owningGraph();
+
+  WithInsertPoint insert_point(node);
+
+  const auto dtype_value = graph->insertConstant(dtype);
+  const auto false_value = graph->insertConstant(false);
+  const auto none_value = graph->insertConstant(IValue());
+
+  std::unordered_set<Value*> casted_inputs;
+
+  for (auto input : node->inputs()) {
+    if (input->type()->kind() == TensorType::Kind) {
+      casted_inputs.insert(input);
+    }
+  }
+
+  for (auto input : casted_inputs) {
+    const auto new_input = graph->insert(
+        aten::to, {input, dtype_value, false_value, false_value, none_value});
+    node->replaceInputWith(input, new_input);
+  }
+}
+
+void castInputsToWidestType(Node* node) {
+  // TODO
 }
 
 void handleBlock(Block* block, bool initial_state) {
@@ -124,7 +154,7 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::gru_cell:
       case aten::rnn_tanh_cell:
       case aten::rnn_relu_cell:
-        // TODO
+        castTensorInputs(node, at::ScalarType::Half);
         break;
 
       // CastPolicy::fp32 (cast all inputs to float32)
@@ -169,7 +199,7 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::pdist:
       case aten::cdist:
       case aten::renorm:
-        // TODO
+        castTensorInputs(node, at::ScalarType::Float);
         break;
 
       // CastPolicy::promote (promote inputs to the widest type)
@@ -185,7 +215,7 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::index_put:
       case aten::stack:
       case aten::tensordot:
-        // TODO
+        castInputsToWidestType(node);
         break;
 
       // Banned in autocast, see binary_cross_entropy_banned()
@@ -206,9 +236,9 @@ void handleBlock(Block* block, bool initial_state) {
 } // namespace
 
 void AutomaticMixedPrecision(const std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before AutomaticMixedPrecision: ", graph);
+  GRAPH_DUMP("\nBefore AutomaticMixedPrecision: ", graph);
   handleBlock(graph->block(), false);
-  GRAPH_DUMP("After AutomaticMixedPrecision: ", graph);
+  GRAPH_DUMP("\nAfter AutomaticMixedPrecision: ", graph);
 }
 
 } // namespace jit
