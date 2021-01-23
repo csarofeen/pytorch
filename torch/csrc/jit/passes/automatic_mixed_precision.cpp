@@ -54,7 +54,6 @@ c10::optional<AutocastScope> parseAutocast(Value* value) {
           AutocastScope scope;
           scope.instance = value;
           scope.enabled = def->i(attr::value) ? true : false;
-          std::cout << "\n*** " << scope.enabled << "\n"; // $$$
           return scope;
         }
       }
@@ -90,7 +89,20 @@ void castTensorInputs(Node* node, at::ScalarType dtype) {
 }
 
 void castInputsToWidestType(Node* node) {
-  // TODO
+  // Figure out the widest type
+  // (really, just looking for any float32 inputs)
+  //
+  // TODO: revisit this (do we need to consider float64 types?)
+  //
+  for (auto input : node->inputs()) {
+    if (auto tensor_type = input->type()->cast<TensorType>()) {
+      const auto dtype = tensor_type->scalarType();
+      if (!dtype.has_value() || *dtype != at::ScalarType::Half) {
+        castTensorInputs(node, at::ScalarType::Float);
+        return;
+      }
+    }
+  }
 }
 
 void handleBlock(Block* block, bool initial_state) {
