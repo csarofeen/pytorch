@@ -166,7 +166,9 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::gru_cell:
       case aten::rnn_tanh_cell:
       case aten::rnn_relu_cell:
-        castTensorInputs(node, at::ScalarType::Half);
+        if (current_state()) {
+          castTensorInputs(node, at::ScalarType::Half);
+        }
         break;
 
       // CastPolicy::fp32 (cast all inputs to float32)
@@ -211,7 +213,9 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::pdist:
       case aten::cdist:
       case aten::renorm:
-        castTensorInputs(node, at::ScalarType::Float);
+        if (current_state()) {
+          castTensorInputs(node, at::ScalarType::Float);
+        }
         break;
 
       // CastPolicy::promote (promote inputs to the widest type)
@@ -227,7 +231,9 @@ void handleBlock(Block* block, bool initial_state) {
       case aten::index_put:
       case aten::stack:
       case aten::tensordot:
-        castInputsToWidestType(node);
+        if (current_state()) {
+          castInputsToWidestType(node);
+        }
         break;
 
       // Banned in autocast, see binary_cross_entropy_banned()
