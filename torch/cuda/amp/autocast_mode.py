@@ -122,7 +122,8 @@ class autocast(object):
     Arguments:
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
-    def __init__(self, enabled:bool=True):
+
+    def __init__(self, enabled: bool = True):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
         elif enabled and not torch.cuda.is_available():
@@ -138,7 +139,7 @@ class autocast(object):
         torch.set_autocast_enabled(self._enabled)
         torch.autocast_increment_nesting()
 
-    def __exit__(self, exc_type:Any, exc_val:Any, exc_tb:Any):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
         if torch._jit_internal.is_scripting():
             return
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
