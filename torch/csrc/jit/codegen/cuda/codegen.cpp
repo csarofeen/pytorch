@@ -275,8 +275,28 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::UnaryOp* node) final {
+    const auto op_type = node->operation();
     if (!print_inline_) {
-      indent() << gen(node->out());
+      if (op_type == UnaryOpType::VectorizeRead) {
+        indent()
+            << "*reinterpret_cast<"
+            << "Array<" << node->out()->dtype() << ", "
+            << genInline(
+                   node->out()->as<kir::TensorIndex>()->view()->vectorSize())
+            << ">*>"
+            << "(&" << gen(node->out()) << ")";
+      } else if (op_type == UnaryOpType::VectorizeWrite) {
+        indent()
+            << "*reinterpret_cast<"
+            << "Array<" << node->out()->dtype() << ", "
+            << genInline(
+                   node->out()->as<kir::TensorIndex>()->view()->vectorSize())
+            << ">*>"
+            << "(&" << gen(node->out()) << ")";
+      } else {
+        indent() << gen(node->out());
+      }
+
       if (!node->out()->isScalar() && !node->in()->isScalar()) {
         code_ << "\n";
         indent() << kTab;
@@ -284,7 +304,6 @@ class CudaKernelGenerator : private kir::IrVisitor {
       code_ << " = ";
     }
 
-    const auto op_type = node->operation();
     if (auto op = inline_op_str(op_type)) {
       if (alsoBooleanOperator(op_type) &&
           node->out()->dtype() == DataType::Bool) {
@@ -292,6 +311,21 @@ class CudaKernelGenerator : private kir::IrVisitor {
       } else {
         code_ << *op << gen(node->in());
       }
+    } else if (op_type == UnaryOpType::VectorizeRead) {
+      code_ << "*reinterpret_cast<"
+            << "Array<" << node->in()->dtype() << ", "
+            << genInline(
+                   node->in()->as<kir::TensorIndex>()->view()->vectorSize())
+            << ">*>"
+            << "(&" << gen(node->in()) << ")";
+    } else if (op_type == UnaryOpType::VectorizeWrite) {
+      // code_ << "vec_" << gen(node->in());
+      code_ << "*reinterpret_cast<"
+            << "Array<" << node->in()->dtype() << ", "
+            << genInline(
+                   node->in()->as<kir::TensorIndex>()->view()->vectorSize())
+            << ">*>"
+            << "(&" << gen(node->in()) << ")";
     } else {
       if (op_type == UnaryOpType::Cast) {
         const auto cast_str =
@@ -646,8 +680,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
     const auto gen_index = gen(node->index());
     const auto gen_start = genInline(node->iter_domain()->start());
     const auto gen_extent = genInline(node->iter_domain()->extent());
+    const auto gen_offset = genInline(node->offset());
     indent() << "for(size_t " << gen_index << " = " << gen_start << "; "
-             << gen_index << " < " << gen_extent << "; ++" << gen_index << ") ";
+             << gen_index << " < " << gen_extent << "; " << gen_index
+             << " += " << gen_offset << ") ";
 
     startBlock(true);
     handleScope(node->body());
@@ -694,7 +730,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
                << varName(alias_tv) << ";\n";
     } else {
       // Standard Memory Allocation
-      switch (tv->memoryType()) {
+      switch (node->memoryType()) {
         case MemoryType::Global:
           indent() << "// Allocate global tensor " << varName(tv) << "\n";
           break;

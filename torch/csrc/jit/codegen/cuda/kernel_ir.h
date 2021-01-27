@@ -700,15 +700,29 @@ class TORCH_CUDA_CU_API TensorView final : public Val {
     return memory_type_;
   }
 
+  Val* vectorSize() const {
+    return vector_size_;
+  }
+
   fuser::cuda::TensorView* fuserTv() const {
     TORCH_INTERNAL_ASSERT(fuser_tv_ != nullptr);
     // TODO(kir): remove the need for const_cast
     return const_cast<fuser::cuda::TensorView*>(fuser_tv_); // NOLINT
   }
 
+  void setAllocation(Allocate* allocation) {
+    allocation_ = allocation;
+  }
+
+  Allocate* allocation() const {
+    return allocation_;
+  }
+
  private:
   TensorDomain* domain_ = nullptr;
   MemoryType memory_type_ = MemoryType::Local;
+  Val* vector_size_ = nullptr;
+  Allocate* allocation_ = nullptr;
 
   // TODO(kir): remove temporary hack
   const fuser::cuda::TensorView* fuser_tv_ = nullptr;
@@ -1087,6 +1101,7 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   ForLoop(
       Passkey passkey,
       Val* index,
+      Val* offset,
       IterDomain* iter_domain,
       Expr* parent_scope);
 
@@ -1100,6 +1115,10 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   Val* index() const {
     return index_;
+  }
+
+  Val* offset() const {
+    return offset_;
   }
 
   IterDomain* iter_domain() const {
@@ -1116,6 +1135,7 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
  private:
   Val* const index_ = nullptr;
+  Val* const offset_ = nullptr;
   IterDomain* const iter_domain_;
   Scope body_;
 };

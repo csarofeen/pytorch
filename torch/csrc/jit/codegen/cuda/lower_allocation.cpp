@@ -131,11 +131,15 @@ class AllocationInserter : public kir::MutableIrVisitor {
         ss << id->parallelType();
         new_loop = ir_builder.create<kir::ForLoop>(
             ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int),
+            ir_builder.create<kir::Int>(1),
             id,
             nullptr);
       } else {
         new_loop = ir_builder.create<kir::ForLoop>(
-            ir_builder.create<kir::Int>(c10::nullopt), id, nullptr);
+            ir_builder.create<kir::Int>(c10::nullopt),
+            ir_builder.create<kir::Int>(1),
+            id,
+            nullptr);
       }
       init_expr->setParentScope(new_loop);
       new_loop->body().push_back(init_expr);

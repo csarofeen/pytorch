@@ -24,13 +24,54 @@ kir::ForLoop* cloneLoopNest(
     kir::Expr* parent_scope) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->index(), for_loop->iter_domain(), parent_scope);
+      for_loop->index(),
+      for_loop->offset(),
+      for_loop->iter_domain(),
+      parent_scope);
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       expr = cloneLoopNest(nested_for_loop, new_loop);
     }
     new_loop->body().push_back(expr);
   }
+  return new_loop;
+}
+
+kir::ForLoop* cloneVectorizeLoopNest(
+    const kir::ForLoop* for_loop,
+    kir::Expr* parent_scope) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  TORCH_CHECK(for_loop->body().exprs().size() == 1);
+
+  auto expr = for_loop->body().exprs().front();
+
+  TORCH_CHECK(
+      expr != nullptr && expr->isA<kir::UnaryOp>() &&
+      expr->as<kir::UnaryOp>()->operation() == UnaryOpType::Set);
+
+  auto unaryOp = expr->as<kir::UnaryOp>();
+  auto input = unaryOp->in()->as<kir::TensorView>();
+  auto output = unaryOp->out()->as<kir::TensorView>();
+
+  bool isVectorizedRead = output->memoryType() == MemoryType::Local &&
+      input->memoryType() == MemoryType::Global;
+
+  const auto vector_size = output->vectorSize();
+  TORCH_INTERNAL_ASSERT(vector_size != nullptr);
+
+  const auto new_loop = ir_builder.create<kir::ForLoop>(
+      for_loop->index(), vector_size, for_loop->iter_domain(), parent_scope);
+
+  if (isVectorizedRead) {
+    auto vectorize_read = ir_builder.create<kir::UnaryOp>(
+        UnaryOpType::VectorizeRead, output, input);
+    new_loop->body().push_back(vectorize_read);
+  } else {
+    auto vectorize_write = ir_builder.create<kir::UnaryOp>(
+        UnaryOpType::VectorizeWrite, output, input);
+    new_loop->body().push_back(vectorize_write);
+  }
+
   return new_loop;
 }
 
@@ -119,9 +160,12 @@ void UnrollPass::handle(kir::ForLoop* fl) {
       fl->iter_domain()->parallelType() == ParallelType::Unroll ||
       fl->iter_domain()->parallelType() == ParallelType::Unswitch;
 
+  const bool is_vectorize =
+      fl->iter_domain()->parallelType() == ParallelType::Vectorize;
+
   // If we're not looking for an unroll loop, or didn't find one, process as
   // normal.
-  if (!is_unroll || !look_for_unroll_) {
+  if (!(is_unroll || is_vectorize) || !look_for_unroll_) {
     for_loops_.push_back(fl);
 
     // Make copy of exprs because we replace them inplace in fl
@@ -134,34 +178,44 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     return;
   }
 
-  auto unroll_pred =
-      UnswitchPredicate::get(for_loops_, fl, p2c_root_map_, ca_root_map_);
+  if (is_unroll) {
+    auto unroll_pred =
+        UnswitchPredicate::get(for_loops_, fl, p2c_root_map_, ca_root_map_);
 
-  kir::ForLoop* parent_scope = for_loops_.empty() ? nullptr : for_loops_.back();
+    kir::ForLoop* parent_scope =
+        for_loops_.empty() ? nullptr : for_loops_.back();
 
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  kir::IfThenElse* unroll_ite =
-      ir_builder.create<kir::IfThenElse>(unroll_pred, parent_scope);
+    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+    kir::IfThenElse* unroll_ite =
+        ir_builder.create<kir::IfThenElse>(unroll_pred, parent_scope);
 
-  // Get the loop nest for the unrolled path
-  kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl, unroll_ite);
+    // Get the loop nest for the unrolled path
+    kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl, unroll_ite);
 
-  unroll_ite->thenBody().push_back(unrolled_loop_nest);
+    unroll_ite->thenBody().push_back(unrolled_loop_nest);
 
-  // Loop nest for inlined path
-  kir::ForLoop* inlined_loop = cloneLoopNest(fl, unroll_ite);
+    // Loop nest for inlined path
+    kir::ForLoop* inlined_loop = cloneLoopNest(fl, unroll_ite);
 
-  // Add inline predicates for inlined loop nest
-  look_for_unroll_ = false;
-  non_trivial_pred_found_ = false;
-  handle(inlined_loop);
-  look_for_unroll_ = true;
-  if (!non_trivial_pred_found_) {
-    inlined_loop->setParentScope(parent_scope);
-    loop_replacement_map_.insert({fl, inlined_loop});
+    // Add inline predicates for inlined loop nest
+    look_for_unroll_ = false;
+    non_trivial_pred_found_ = false;
+    handle(inlined_loop);
+    look_for_unroll_ = true;
+    if (!non_trivial_pred_found_) {
+      inlined_loop->setParentScope(parent_scope);
+      loop_replacement_map_.insert({fl, inlined_loop});
+    } else {
+      unroll_ite->elseBody().push_back(inlined_loop);
+      loop_replacement_map_.insert({fl, unroll_ite});
+    }
   } else {
-    unroll_ite->elseBody().push_back(inlined_loop);
-    loop_replacement_map_.insert({fl, unroll_ite});
+    kir::ForLoop* parent_scope =
+        for_loops_.empty() ? nullptr : for_loops_.back();
+
+    kir::ForLoop* vectorized_loop_nest =
+        cloneVectorizeLoopNest(fl, parent_scope);
+    loop_replacement_map_.insert({fl, vectorized_loop_nest});
   }
 }
 

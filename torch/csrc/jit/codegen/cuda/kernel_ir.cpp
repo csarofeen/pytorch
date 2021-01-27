@@ -198,6 +198,9 @@ TensorView::TensorView(Passkey passkey, const fuser::cuda::TensorView* tv)
   setName(tv->name());
   domain_ = GpuLower::current()->lowerValue(tv->domain())->as<TensorDomain>();
   memory_type_ = tv->getMemoryType();
+  if (tv->vectorSize() != nullptr) {
+    vector_size_ = GpuLower::current()->lowerValue(tv->vectorSize());
+  }
 }
 
 TensorView::TensorView(
@@ -350,9 +353,10 @@ void Scope::clear() {
 ForLoop::ForLoop(
     Passkey passkey,
     Val* index,
+    Val* offset,
     IterDomain* iter_domain,
     Expr* parent_scope)
-    : Expr(passkey), index_{index}, iter_domain_{iter_domain} {
+    : Expr(passkey), index_{index}, offset_(offset), iter_domain_{iter_domain} {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   setParentScope(parent_scope);
   addInput(index);
@@ -398,6 +402,9 @@ Allocate::Allocate(
     for (size_t i = 1; i < domain->nDims(); i++) {
       size_ = ir_builder.mulExpr(size_, domain->axis(i)->extent());
     }
+  }
+  if (buffer_->isA<TensorView>()) {
+    buffer_->as<TensorView>()->setAllocation(this);
   }
   addInput(size_);
 }

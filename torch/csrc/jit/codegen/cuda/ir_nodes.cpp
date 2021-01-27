@@ -569,9 +569,18 @@ Val* IterDomain::extent() const {
 void IterDomain::parallelize(ParallelType t) {
   parallel_type_ = t;
 
-  TORCH_CHECK(t != ParallelType::Vectorize, "Vectorization not yet supported.");
+  if (t == ParallelType::Vectorize) {
+    TORCH_CHECK(
+        start()->isZeroInt() && extent()->isConstScalar(),
+        "Vectorize only supports start = 0 and extent as a const int, but got ",
+        "a start of ",
+        start(),
+        " and extent ",
+        extent(),
+        " .");
+  }
 
-  if (t == ParallelType::Unroll) {
+  if (t == ParallelType::Unroll || t == ParallelType::Unswitch) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
         "Unrolling only supported with start = 0 and extent as a const int, but got ",

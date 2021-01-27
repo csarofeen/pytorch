@@ -101,6 +101,7 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       relative_compute_at_axis_(src->relative_compute_at_axis_),
       this_compute_at_axis_(src->this_compute_at_axis_),
       memory_type_(src->memory_type_),
+      vector_size_(src->vector_size_),
       swizzle_type_(src->swizzle_type_) {
   for (const auto id : src->axesToSwizzle()) {
     axes_to_swizzle_.push_back(ir_cloner->clone(id));

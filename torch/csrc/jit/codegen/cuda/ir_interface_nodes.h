@@ -318,6 +318,14 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   void setMemoryType(MemoryType mt);
 
+  Val* vectorSize() const {
+    return vector_size_;
+  }
+
+  void setVectorSize(Val* vector_size) {
+    vector_size_ = vector_size;
+  }
+
   SwizzleType swizzleType() const {
     return swizzle_type_;
   }
@@ -371,6 +379,8 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   unsigned int relative_compute_at_axis_ = 0;
   unsigned int this_compute_at_axis_ = 0;
   MemoryType memory_type_ = MemoryType::Local;
+  // Vectorization size for this allocation
+  Val* vector_size_ = nullptr;
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
 };

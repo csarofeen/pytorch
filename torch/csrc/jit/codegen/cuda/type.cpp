@@ -245,6 +245,10 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "tanh";
     case UnaryOpType::Trunc:
       return "trunc";
+    case UnaryOpType::VectorizeRead:
+      return "vectorizeRead";
+    case UnaryOpType::VectorizeWrite:
+      return "vectorizeWrite";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
