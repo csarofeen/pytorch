@@ -691,6 +691,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::IfThenElse* node) final {
+    // If predicate condition is true, print only the "then" body
+    if (node->cond()->value().value_or(false)) {
+      handleScope(node->thenBody());
+      return;
+    }
+
     indent() << "if (" << genInline(node->cond()) << ") ";
 
     // "then" block

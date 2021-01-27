@@ -178,14 +178,13 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     return;
   }
 
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  kir::ForLoop* parent_scope = for_loops_.empty() ? nullptr : for_loops_.back();
+
   if (is_unroll) {
     auto unroll_pred =
         UnswitchPredicate::get(for_loops_, fl, p2c_root_map_, ca_root_map_);
 
-    kir::ForLoop* parent_scope =
-        for_loops_.empty() ? nullptr : for_loops_.back();
-
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     kir::IfThenElse* unroll_ite =
         ir_builder.create<kir::IfThenElse>(unroll_pred, parent_scope);
 
@@ -210,12 +209,17 @@ void UnrollPass::handle(kir::ForLoop* fl) {
       loop_replacement_map_.insert({fl, unroll_ite});
     }
   } else {
-    kir::ForLoop* parent_scope =
-        for_loops_.empty() ? nullptr : for_loops_.back();
+    auto vectorize_pred = ir_builder.create<kir::Bool>(true);
+
+    kir::IfThenElse* vectorized_ite =
+        ir_builder.create<kir::IfThenElse>(vectorize_pred, parent_scope);
 
     kir::ForLoop* vectorized_loop_nest =
-        cloneVectorizeLoopNest(fl, parent_scope);
-    loop_replacement_map_.insert({fl, vectorized_loop_nest});
+        cloneVectorizeLoopNest(fl, vectorized_ite);
+
+    vectorized_ite->thenBody().push_back(vectorized_loop_nest);
+
+    loop_replacement_map_.insert({fl, vectorized_ite});
   }
 }
 
