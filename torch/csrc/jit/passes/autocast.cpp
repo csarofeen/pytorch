@@ -37,16 +37,17 @@ struct AutocastScope {
 //    but there might be other nodes in between
 //
 c10::optional<AutocastScope> parseAutocast(Value* value) {
-  if (value->node()->kind() == prim::CreateObject) {
-    const auto class_name = getModuleName(value);
-    if (class_name &&
-        *class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast") {
+  const auto class_name = getModuleName(value);
+  if (class_name &&
+      *class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast") {
+    if (value->node()->kind() == prim::CreateObject) {
       // Search for `prim::SetAttr[name="_enabled"]`
       for (Use use : value->uses()) {
         if (use.user->kind() == prim::SetAttr &&
             use.user->s(attr::name) == "_enabled") {
           const auto def = use.user->input(1)->node();
           if (def->kind() != prim::Constant) {
+            // TODO: better error message
             AT_ERROR("Autocast argument must be a constant");
           }
 
@@ -57,6 +58,19 @@ c10::optional<AutocastScope> parseAutocast(Value* value) {
           return scope;
         }
       }
+    } else {
+      // We only support simple and static autocast expressions. For example,
+      // the following should report an error (since the autocast would not
+      // work as expected)
+      //
+      //    autocast_on = autocast(enabled=True)
+      //    autocast_off = autocast(enabled=False)
+      //    with autocast_on if condition else autocast_off:
+      //        ...
+      //
+      // TODO: better error message
+      //
+      AT_ERROR("Unsupported autocast syntax");
     }
   }
 
