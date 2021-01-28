@@ -2,6 +2,7 @@
 import torch
 from torch.cuda.amp import autocast
 
+import unittest
 from test_jit import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 
@@ -107,6 +108,16 @@ class TestAutocast(JitTestCase):
         self.assertEqual(e.dtype, torch.float16)
         self.assertEqual(f.dtype, torch.float32)
 
+    # TODO: fix and enable this test
+    @unittest.skipIf(True, "promote policy is currently broken")
+    def test_promote_policy_fp64(self):
+        @torch.jit.script
+        def fn(a, b):
+            with autocast(enabled=True):
+                return torch.addcmul(a, a, b, value=0.1)
+        result = fn(self.a_fp32.double(), self.b_fp32.double())
+        self.assertEqual(result.dtype, torch.float64)
+
     def test_control_flow(self):
         @torch.jit.script
         def fn(a, b, c, d):
@@ -166,6 +177,21 @@ class TestAutocast(JitTestCase):
         with self.assertRaises(RuntimeError):
             fn(self.a_fp32, self.b_fp32)
 
+    def test_nested_autocast(self):
+        @torch.jit.script
+        def fn(a, b, c, d):
+            with autocast(enabled=False):
+                e = torch.mm(a, b)
+                with autocast(enabled=True):
+                    f = torch.mm(e, c)
+                    with autocast(enabled=False):
+                        g = torch.mm(e, d)
+            return e, f, g
+        e, f, g = fn(self.a_fp32, self.b_fp32, self.c_fp32, self.d_fp32)
+        self.assertEqual(e.dtype, torch.float32)
+        self.assertEqual(f.dtype, torch.float16)
+        self.assertEqual(g.dtype, torch.float32)
+
     def test_reused_autocast(self):
         @torch.jit.script
         def fn(a, b, c, d):
@@ -181,6 +207,21 @@ class TestAutocast(JitTestCase):
         self.assertEqual(e.dtype, torch.float16)
         self.assertEqual(f.dtype, torch.float16)
         self.assertEqual(g.dtype, torch.float16)
+
+    def test_callees(self):
+        def helper(a, b):
+            return torch.mm(a, b)
+
+        @torch.jit.script
+        def fn(a, b):
+            with autocast(enabled=True):
+                tmp = helper(a, b)
+                tmp = helper(tmp, tmp)
+                tmp = helper(tmp, tmp)
+                tmp = helper(tmp, tmp)
+                return helper(tmp, b)
+        result = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(result.dtype, torch.float16)
 
 
 if __name__ == '__main__':
