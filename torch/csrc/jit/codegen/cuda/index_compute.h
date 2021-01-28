@@ -221,6 +221,19 @@ class Index {
       const std::vector<bool>& root_contiguity,
       const ComputeAtRootDomainMap& ca_root_map,
       bool unswitch = false);
+
+  static std::vector<kir::Val*> getProducerRootVectIndices(
+      const kir::TensorView* producer_tv,
+      const kir::TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops,
+      const std::vector<bool>& root_contiguity,
+      const ComputeAtRootDomainMap& ca_root_map);
+
+  static std::vector<kir::Val*> getConsumerRootVectIndices(
+      const kir::TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops,
+      const std::vector<bool>& root_contiguity,
+      const ComputeAtRootDomainMap& ca_root_map);
 };
 
 } // namespace cuda

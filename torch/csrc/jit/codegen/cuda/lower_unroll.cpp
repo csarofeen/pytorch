@@ -39,7 +39,7 @@ kir::ForLoop* cloneLoopNest(
   return new_loop;
 }
 
-kir::ForLoop* cloneVectorizeLoopNest(
+kir::ForLoop* cloneExplicitVectorizeLoopNest(
     const kir::ForLoop* for_loop,
     kir::Expr* parent_scope) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
@@ -80,6 +80,129 @@ kir::ForLoop* cloneVectorizeLoopNest(
   }
 
   return new_loop;
+}
+
+kir::Val* generateIndex(
+    kir::Expr* expr,
+    std::vector<kir::ForLoop*> for_loops,
+    const ComputeAtRootDomainMap& ca_root_map) {
+  auto unaryOp = expr->as<kir::UnaryOp>();
+  auto input = unaryOp->in()->as<kir::TensorView>();
+  auto output = unaryOp->out()->as<kir::TensorView>();
+
+  bool isVectorizedRead = output->memoryType() == MemoryType::Local &&
+      input->memoryType() == MemoryType::Global;
+
+  auto pred_contiguity = output->domain()->contiguity();
+
+  for (auto inp : expr->inputs()) {
+    if (auto inp_tv = dynamic_cast<kir::TensorView*>(inp)) {
+      if (inp_tv->domain()->hasRFactor() ||
+          inp_tv->memoryType() == MemoryType::Shared ||
+          inp_tv->memoryType() == MemoryType::Local) {
+        continue;
+      } else {
+        pred_contiguity = IndexCompute::contiguityAnd(
+            pred_contiguity,
+            IndexCompute::contiguityPasC(inp_tv->domain(), output->domain()));
+      }
+    }
+  }
+
+  auto pred_inds = (isVectorizedRead)
+      ? Index::getProducerRootVectIndices(
+            input, output, for_loops, pred_contiguity, ca_root_map)
+      : Index::getConsumerRootVectIndices(
+            output, for_loops, pred_contiguity, ca_root_map);
+
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  kir::Val* index = nullptr;
+  for (auto idx : pred_inds) {
+    index = (index == nullptr) ? idx : ir_builder.addExpr(index, idx);
+  }
+  return index;
+}
+
+void cloneVectorizeLoopNest(
+    kir::ForLoop* for_loop,
+    std::vector<kir::ForLoop*> outer_loops,
+    kir::IfThenElse* vectorized_ite,
+    const ComputeAtRootDomainMap& ca_root_map) {
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+
+  TORCH_CHECK(for_loop->body().exprs().size() == 1);
+  auto expr = for_loop->body().exprs().front();
+
+  TORCH_CHECK(
+      expr != nullptr && expr->isA<kir::UnaryOp>() &&
+      expr->as<kir::UnaryOp>()->operation() == UnaryOpType::Set);
+  auto unaryOp = expr->as<kir::UnaryOp>();
+  auto input = unaryOp->in()->as<kir::TensorView>();
+  auto output = unaryOp->out()->as<kir::TensorView>();
+
+  bool isVectorizedRead = output->memoryType() == MemoryType::Local &&
+      input->memoryType() == MemoryType::Global;
+
+  const auto vector_size = output->vectorSize();
+  TORCH_INTERNAL_ASSERT(vector_size != nullptr);
+
+  outer_loops.push_back(for_loop);
+
+  auto base_index = generateIndex(expr, outer_loops, ca_root_map);
+  auto start_shift = ir_builder.modExpr(base_index, vector_size);
+
+  auto extent_start = ir_builder.subExpr(for_loop->extent(), start_shift);
+  auto end_shift = ir_builder.modExpr(extent_start, vector_size);
+
+  auto extent_end = ir_builder.subExpr(for_loop->extent(), end_shift);
+
+  // Pre [0, start_shift, 1]
+  const auto pre_loop = ir_builder.create<kir::ForLoop>(
+      for_loop->index(),
+      for_loop->initial(),
+      start_shift,
+      ir_builder.create<kir::Int>(1),
+      for_loop->iter_domain(),
+      vectorized_ite);
+  vectorized_ite->thenBody().push_back(pre_loop);
+
+  auto pre_read =
+      ir_builder.create<kir::UnaryOp>(UnaryOpType::Set, output, input);
+  pre_loop->body().push_back(pre_read);
+
+  // Vectorized [start_shift, extent - end_shift, vector_size]
+  const auto vectorized_loop = ir_builder.create<kir::ForLoop>(
+      for_loop->index(),
+      start_shift,
+      extent_end,
+      vector_size,
+      for_loop->iter_domain(),
+      vectorized_ite);
+  vectorized_ite->thenBody().push_back(vectorized_loop);
+
+  if (isVectorizedRead) {
+    auto vectorize_read = ir_builder.create<kir::UnaryOp>(
+        UnaryOpType::VectorizeRead, output, input);
+    vectorized_loop->body().push_back(vectorize_read);
+  } else {
+    auto vectorize_write = ir_builder.create<kir::UnaryOp>(
+        UnaryOpType::VectorizeWrite, output, input);
+    vectorized_loop->body().push_back(vectorize_write);
+  }
+
+  // Post [extent-end_shift, extent, 1]
+  const auto post_loop = ir_builder.create<kir::ForLoop>(
+      for_loop->index(),
+      extent_end,
+      for_loop->extent(),
+      ir_builder.create<kir::Int>(1),
+      for_loop->iter_domain(),
+      vectorized_ite);
+  vectorized_ite->thenBody().push_back(post_loop);
+
+  auto post_read =
+      ir_builder.create<kir::UnaryOp>(UnaryOpType::Set, output, input);
+  post_loop->body().push_back(post_read);
 }
 
 // Returns true if expr is an expression that initializes a reduction
@@ -221,10 +344,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
     kir::IfThenElse* vectorized_ite =
         ir_builder.create<kir::IfThenElse>(vectorize_pred, parent_scope);
 
-    kir::ForLoop* vectorized_loop_nest =
-        cloneVectorizeLoopNest(fl, vectorized_ite);
-
-    vectorized_ite->thenBody().push_back(vectorized_loop_nest);
+    cloneVectorizeLoopNest(fl, for_loops_, vectorized_ite, ca_root_map_);
 
     loop_replacement_map_.insert({fl, vectorized_ite});
   }

@@ -1614,6 +1614,204 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   return {root_inds, use_rfactor};
 }
 
+std::vector<kir::Val*> Index::getProducerRootVectIndices(
+    const kir::TensorView* producer_tv,
+    const kir::TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::vector<bool>& root_contiguity,
+    const ComputeAtRootDomainMap& ca_root_map) {
+  FUSER_PERF_SCOPE("Index::getProducerRootVectIndices");
+
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  auto zero = ir_builder.create<kir::Int>(0);
+
+  // Replay producer to look like consumer so we can index on producer since our
+  // loop nests look like consumer
+  auto producerAsC =
+      TransformReplay::replayPasC(
+          producer_tv->fuserTv()->domain(),
+          consumer_tv->fuserTv()->domain(),
+          -1,
+          PairwiseRootDomainMap(producer_tv->fuserTv(), consumer_tv->fuserTv()))
+          .first;
+
+  // Make the actual producer_tv look like consumer while we do the indexing
+  // math in this function
+  ir_utils::TVDomainGuard domain_guard(producer_tv->fuserTv(), producerAsC);
+
+  // grab all tensor views from producer_tv <- computeAtRoot
+  auto tv_stack = getComputeAtTVStackFrom(consumer_tv->fuserTv());
+  tv_stack.push_back(producer_tv->fuserTv());
+
+  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
+  std::transform(
+      loops.begin(),
+      loops.end(),
+      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
+      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
+
+  bool within_vectorize = false;
+  for (auto loop : loops) {
+    if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+      within_vectorize = true;
+    }
+
+    if (within_vectorize && !loop->iter_domain()->isThread()) {
+      loop_to_ind_map[loop] = loop->iter_domain()->extent();
+    }
+  }
+
+  auto index_map = generateIndexAndExtentMap(
+                       tv_stack,
+                       std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
+                       loop_to_ind_map,
+                       root_contiguity,
+                       ca_root_map,
+                       true)
+                       .first;
+
+  // Indices should now be mapped onto IterDomains in producer, so just grab
+  // and use them.
+  auto root_dom = producer_tv->fuserTv()->getMaybeRFactorDomain();
+
+  bool inner_most_dim_contig =
+      root_dom[root_dom.size() - 1]->getIterType() == IterType::Iteration &&
+      producer_tv->domain()->contiguity()[root_dom.size() - 1];
+
+  // Global striding
+  int64_t stride_i = 0;
+  std::vector<kir::Val*> strided_inds;
+  for (size_t i = 0; i < root_dom.size(); i++) {
+    if (root_dom[i]->isReduction() ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    } else if (root_dom[i]->getIterType() == IterType::BroadcastWithStride) {
+      stride_i++;
+      continue;
+    }
+
+    auto kir_root_dom_i =
+        GpuLower::current()->lowerValue(root_dom[i])->as<kir::IterDomain>();
+
+    TORCH_INTERNAL_ASSERT(
+        index_map.find(kir_root_dom_i) != index_map.end(),
+        "Couldn't find root mapping for TV",
+        producer_tv->name(),
+        " dim: ",
+        i,
+        " id: ",
+        kir::toString(kir_root_dom_i));
+
+    auto root_ind = index_map.at(kir_root_dom_i);
+
+    if (i == root_dom.size() - 1 && inner_most_dim_contig) {
+      strided_inds.push_back(root_ind);
+    } else if (root_ind->isZeroInt()) {
+      stride_i++;
+    } else {
+      std::stringstream ss;
+      ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
+      strided_inds.push_back(ir_builder.mulExpr(
+          root_ind,
+          ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int)));
+    }
+  }
+
+  if (strided_inds.size() == 0)
+    strided_inds.push_back(zero);
+
+  return strided_inds;
+}
+
+std::vector<kir::Val*> Index::getConsumerRootVectIndices(
+    const kir::TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::vector<bool>& root_contiguity,
+    const ComputeAtRootDomainMap& ca_root_map) {
+  FUSER_PERF_SCOPE("Index::getConsumerRootVectIndices");
+
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+  auto zero = ir_builder.create<kir::Int>(0);
+
+  // grab all tensor views from producer_tv <- computeAtRoot
+  auto tv_stack = getComputeAtTVStackFrom(consumer_tv->fuserTv());
+
+  std::unordered_map<kir::ForLoop*, kir::Val*> loop_to_ind_map;
+  std::transform(
+      loops.begin(),
+      loops.end(),
+      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
+      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
+
+  bool within_vectorize = false;
+  for (auto loop : loops) {
+    if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
+      within_vectorize = true;
+    }
+
+    if (within_vectorize && !loop->iter_domain()->isThread()) {
+      loop_to_ind_map[loop] = loop->iter_domain()->extent();
+    }
+  }
+
+  auto index_map = generateIndexAndExtentMap(
+                       tv_stack,
+                       std::deque<kir::ForLoop*>(loops.begin(), loops.end()),
+                       loop_to_ind_map,
+                       consumer_tv->fuserTv()->domain()->contiguity(),
+                       ca_root_map)
+                       .first;
+
+  // Indices should now be mapped onto IterDomains in consumer, so just grab
+  // and use them.
+  auto root_dom = consumer_tv->fuserTv()->getMaybeRFactorDomain();
+
+  bool inner_most_dim_contig =
+      root_dom[root_dom.size() - 1]->getIterType() == IterType::Iteration &&
+      consumer_tv->fuserTv()->domain()->contiguity()[root_dom.size() - 1];
+
+  int64_t stride_i = 0;
+  std::vector<kir::Val*> strided_inds;
+  for (size_t i = 0; i < root_dom.size(); i++) {
+    if (root_dom[i]->isReduction() ||
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+      continue;
+    } else if (root_dom[i]->getIterType() == IterType::BroadcastWithStride) {
+      stride_i++;
+      continue;
+    }
+
+    auto kir_root_dom_i =
+        GpuLower::current()->lowerValue(root_dom[i])->as<kir::IterDomain>();
+
+    TORCH_INTERNAL_ASSERT(
+        index_map.find(kir_root_dom_i) != index_map.end(),
+        "Couldn't find root mapping for TV",
+        consumer_tv->name(),
+        " dim: ",
+        i,
+        " id: ",
+        kir::toString(kir_root_dom_i));
+    auto ind = index_map.at(kir_root_dom_i);
+
+    if (i == root_dom.size() - 1 && inner_most_dim_contig) {
+      strided_inds.push_back(ind);
+    } else if (ind->isZeroInt()) {
+      stride_i++;
+    } else {
+      std::stringstream ss;
+      ss << "T" << consumer_tv->name() << ".stride[" << stride_i++ << "]";
+      strided_inds.push_back(ir_builder.mulExpr(
+          ind, ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int)));
+    }
+  }
+
+  if (strided_inds.size() == 0)
+    strided_inds.push_back(zero);
+
+  return strided_inds;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

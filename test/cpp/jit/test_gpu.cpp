@@ -1148,25 +1148,25 @@ TEST(NVFuserTest, FusionParser_CUDA) {
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   float T2[1];
   if ((((((blockIdx.x * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
-    for(size_t ki27 = 0; ki27 < 1; ki27 += 1) {
-      T2[ki27]
-        = T0[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)]
-        * T1[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)];
-      T3[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)]
-        = T2[ki27]
-        * T0[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)];
+    for(size_t ki28 = 0; ki28 < 1; ki28 += 1) {
+      T2[ki28]
+        = T0[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)]
+        * T1[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)];
+      T3[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)]
+        = T2[ki28]
+        * T0[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)];
     }
   } else {
-    for(size_t ki27 = 0; ki27 < 1; ki27 += 1) {
-      if ((((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x) < T0.size[0])) {
-        T2[ki27]
-          = T0[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)]
-          * T1[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)];
+    for(size_t ki28 = 0; ki28 < 1; ki28 += 1) {
+      if ((((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x) < T0.size[0])) {
+        T2[ki28]
+          = T0[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)]
+          * T1[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)];
       }
-      if ((((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x) < T0.size[0])) {
-        T3[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)]
-          = T2[ki27]
-          * T0[((((blockIdx.x * 1) + ki27) * 128) + threadIdx.x)];
+      if ((((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x) < T0.size[0])) {
+        T3[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)]
+          = T2[ki28]
+          * T0[((((blockIdx.x * 1) + ki28) * 128) + threadIdx.x)];
       }
     }
   }
@@ -6978,6 +6978,47 @@ TEST(NVFuserTest, FusionVectorization1_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   const int bx = 128;
   const int by = 2048;
+  at::Tensor t0 = at::randn({bx, by}, options);
+  at::Tensor t1 = at::randn({bx, by}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionVectorization2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->split(1, 16);
+  tv2->split(1, 64);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto c0 = tv0->cache_after();
+  c0->computeAt(tv2, -2);
+
+  tv0->setVectorSize(new Int(4));
+  c0->setVectorSize(new Int(4));
+  c0->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 100;
+  const int by = 450;
   at::Tensor t0 = at::randn({bx, by}, options);
   at::Tensor t1 = at::randn({bx, by}, options);
   std::vector<IValue> aten_inputs = {t0, t1};
