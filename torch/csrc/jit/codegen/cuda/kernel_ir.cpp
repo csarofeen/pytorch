@@ -353,10 +353,17 @@ void Scope::clear() {
 ForLoop::ForLoop(
     Passkey passkey,
     Val* index,
+    Val* initial,
+    Val* extent,
     Val* offset,
     IterDomain* iter_domain,
     Expr* parent_scope)
-    : Expr(passkey), index_{index}, offset_(offset), iter_domain_{iter_domain} {
+    : Expr(passkey),
+      index_{index},
+      initial_(initial),
+      extent_(extent),
+      offset_(offset),
+      iter_domain_{iter_domain} {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   setParentScope(parent_scope);
   addInput(index);

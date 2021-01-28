@@ -1101,6 +1101,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   ForLoop(
       Passkey passkey,
       Val* index,
+      Val* initial,
+      Val* extent,
       Val* offset,
       IterDomain* iter_domain,
       Expr* parent_scope);
@@ -1115,6 +1117,14 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   Val* index() const {
     return index_;
+  }
+
+  Val* initial() const {
+    return initial_;
+  }
+
+  Val* extent() const {
+    return extent_;
   }
 
   Val* offset() const {
@@ -1135,6 +1145,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
  private:
   Val* const index_ = nullptr;
+  Val* const initial_ = nullptr;
+  Val* const extent_ = nullptr;
   Val* const offset_ = nullptr;
   IterDomain* const iter_domain_;
   Scope body_;

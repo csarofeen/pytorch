@@ -25,6 +25,8 @@ kir::ForLoop* cloneLoopNest(
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   const auto new_loop = ir_builder.create<kir::ForLoop>(
       for_loop->index(),
+      for_loop->initial(),
+      for_loop->extent(),
       for_loop->offset(),
       for_loop->iter_domain(),
       parent_scope);
@@ -60,7 +62,12 @@ kir::ForLoop* cloneVectorizeLoopNest(
   TORCH_INTERNAL_ASSERT(vector_size != nullptr);
 
   const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->index(), vector_size, for_loop->iter_domain(), parent_scope);
+      for_loop->index(),
+      for_loop->initial(),
+      for_loop->extent(),
+      vector_size,
+      for_loop->iter_domain(),
+      parent_scope);
 
   if (isVectorizedRead) {
     auto vectorize_read = ir_builder.create<kir::UnaryOp>(

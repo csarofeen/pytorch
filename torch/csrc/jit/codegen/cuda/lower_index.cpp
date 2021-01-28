@@ -82,6 +82,8 @@ void IndexLowering::visit(const kir::ForLoop* for_loop) {
 
   auto new_for_loop = ir_builder_.create<kir::ForLoop>(
       for_loop->index(),
+      for_loop->initial(),
+      for_loop->extent(),
       for_loop->offset(),
       for_loop->iter_domain(),
       prev_scope_expr);
