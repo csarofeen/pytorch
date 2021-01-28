@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/passes/automatic_mixed_precision.h>
+#include <torch/csrc/jit/passes/autocast.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -90,7 +90,7 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   //     of the any optimizations
   //  2. AMP transformations would benefit from followup passes's cleanup
   //
-  AutomaticMixedPrecision(graph);
+  Autocast(graph);
 
   ConstantPooling(graph);
 }

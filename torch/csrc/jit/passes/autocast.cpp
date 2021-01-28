@@ -1,5 +1,5 @@
 
-#include <torch/csrc/jit/passes/automatic_mixed_precision.h>
+#include <torch/csrc/jit/passes/autocast.h>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -253,10 +253,10 @@ void handleBlock(Block* block, bool initial_state) {
 
 } // namespace
 
-void AutomaticMixedPrecision(const std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("\nBefore AutomaticMixedPrecision: ", graph);
+void Autocast(const std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("\nBefore Autocast: ", graph);
   handleBlock(graph->block(), false);
-  GRAPH_DUMP("\nAfter AutomaticMixedPrecision: ", graph);
+  GRAPH_DUMP("\nAfter Autocast: ", graph);
 }
 
 } // namespace jit
