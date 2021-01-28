@@ -78,14 +78,15 @@ class TestAutocast(JitTestCase):
         self.assertEqual(f.dtype, torch.float64)
         self.assertEqual(g.dtype, torch.float64)
 
+    # multiple uses of the same input value
     def test_duplicate_inputs(self):
         @torch.jit.script
-        def fn(a, b, c, d):
+        def fn(a, b):
             with autocast():
                 e = torch.mm(a, a)
                 f = torch.mm(e, e)
             return e, f
-        e, f = fn(self.a_fp32, self.b_fp32, self.c_fp32, self.d_fp32)
+        e, f = fn(self.a_fp32, self.b_fp32)
         self.assertEqual(e.dtype, torch.float16)
         self.assertEqual(f.dtype, torch.float16)
 
@@ -192,11 +193,37 @@ class TestAutocast(JitTestCase):
         self.assertEqual(f.dtype, torch.float16)
         self.assertEqual(g.dtype, torch.float32)
 
+    def test_implicitly_nested_autocast(self):
+        @torch.jit.script
+        def fn(a, b):
+            with autocast(enabled=False), autocast(enabled=True):
+                return torch.mm(a, b)
+        result = fn(self.a_fp32, self.b_fp32)
+        self.assertEqual(result.dtype, torch.float16)
+
     def test_reused_autocast(self):
         @torch.jit.script
         def fn(a, b, c, d):
             autocast_instance = autocast(enabled=True)
             with autocast_instance:
+                e = torch.mm(a, b)
+                with autocast_instance:
+                    e = torch.mm(c, d)
+                    f = torch.mm(d, e)
+            g = torch.mm(e, f)
+            return e, f, g
+        e, f, g = fn(self.a_fp32, self.b_fp32, self.c_fp32, self.d_fp32)
+        self.assertEqual(e.dtype, torch.float16)
+        self.assertEqual(f.dtype, torch.float16)
+        self.assertEqual(g.dtype, torch.float16)
+
+    # TODO: fix and enable this test?
+    #   (we could technically fix this, but is it really worth it?)
+    @unittest.skipIf(True, "unsuported autocast syntax")
+    def test_reused_autocast_expr(self):
+        @torch.jit.script
+        def fn(a, b, c, d):
+            with autocast(enabled=True) as autocast_instance:
                 e = torch.mm(a, b)
                 with autocast_instance:
                     e = torch.mm(c, d)
